@@ -1,0 +1,200 @@
+import { useRef, useState } from "react";
+import { deleteEmployees } from "../api/adminPageDelete";
+import { updateEmployee } from "../api/adminPageUpdate";
+import { formatResidentNumber, getEmployeeSaveErrorMessage } from "../utils/format";
+
+const initialSearchForm = {
+  user_name: "",
+  resident_number: "",
+};
+
+export function useAdminHandlers(state, toast, loadEmployees) {
+  const [showAllLoading, setShowAllLoading] = useState(false);
+  const showAllPending = useRef(false);
+  const {
+    setPeopleData,
+    setPagination,
+    setOrdering,
+    setActiveFilters,
+    checkedItems,
+    setCheckedItems,
+    setSelectedPerson,
+    searchForm,
+    setShowSearchModal,
+    setSearchForm,
+    setIsSearchActive,
+  } = state;
+
+  const notify = (options) => {
+    toast?.({
+      duration: 2500,
+      isClosable: true,
+      ...options,
+    });
+  };
+
+  const handleCheckboxChange = (uuid) => {
+    setCheckedItems((prev) => ({
+      ...prev,
+      [uuid]: !prev[uuid],
+    }));
+  };
+
+  const handleDeleteSelected = async () => {
+    const uuids = Object.entries(checkedItems)
+      .filter(([, checked]) => checked)
+      .map(([uuid]) => uuid);
+
+    if (!uuids.length) return false;
+
+    const res = await deleteEmployees(uuids, { toast });
+
+    if (res?.success) {
+      setCheckedItems({});
+      await loadEmployees();
+      notify({
+        title: "삭제 완료",
+        description: `${uuids.length.toLocaleString()}명의 직원이 삭제되었습니다.`,
+        status: "success",
+      });
+      return true;
+    }
+
+    notify({
+      title: "삭제 실패",
+      description: res?.error || "선택한 직원을 삭제하지 못했습니다.",
+      status: "error",
+    });
+    return false;
+  };
+
+  const handleSave = async (person) => {
+    const res = await updateEmployee(person, { toast });
+
+    if (res?.success) {
+      setPeopleData((prev) =>
+        prev.map((item) =>
+          item.user_uuid === person.user_uuid ? (res.updated || person) : item
+        )
+      );
+      setSelectedPerson(null);
+      notify({
+        title: "수정 완료",
+        description: "직원 정보가 수정되었습니다.",
+        status: "success",
+      });
+      return true;
+    }
+
+    notify({
+      title: "수정 실패",
+      description: getEmployeeSaveErrorMessage(res?.error, "직원 정보를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."),
+      status: "error",
+    });
+    return false;
+  };
+
+  const handleSearchChange = (e) => {
+    const { name, value } = e.target;
+    let nextValue = value;
+
+    if (name === "resident_number") nextValue = formatResidentNumber(value);
+
+    setSearchForm((prev) => ({
+      ...prev,
+      [name]: nextValue,
+    }));
+  };
+
+  const applySearch = async () => {
+    const filters = {};
+    const allowedFilterKeys = ["user_name", "resident_number"];
+
+    allowedFilterKeys.forEach((key) => {
+      if (searchForm[key]?.trim()) {
+        filters[key] = searchForm[key].trim();
+      }
+    });
+
+    if (!Object.keys(filters).length) {
+      notify({
+        title: "검색 조건 없음",
+        description: "하나 이상의 검색 조건을 입력해주세요.",
+        status: "warning",
+      });
+      return;
+    }
+
+    setActiveFilters(filters);
+    setPagination((current) => ({ ...current, page: 1 }));
+    setShowSearchModal(false);
+    setSearchForm(initialSearchForm);
+    setIsSearchActive(true);
+    setCheckedItems({});
+
+    notify({
+      title: "검색 완료",
+      description: "검색 조건을 적용했습니다.",
+      status: "success",
+    });
+  };
+
+  const handleShowAll = async () => {
+    if (showAllPending.current) return false;
+    showAllPending.current = true;
+    setShowAllLoading(true);
+    window.location.reload();
+    return true;
+  };
+
+  const handleCloseSearch = () => {
+    setShowSearchModal(false);
+    setSearchForm(initialSearchForm);
+  };
+
+  const openSearch = () => {
+    setShowSearchModal(true);
+  };
+
+  const handlePageChange = (page) => {
+    setCheckedItems({});
+    setPagination((current) => ({ ...current, page }));
+  };
+
+  const handlePageSizeChange = (pageSize) => {
+    setCheckedItems({});
+    setPagination((current) => ({ ...current, page: 1, page_size: pageSize }));
+  };
+
+  const handleOrderingChange = (field) => {
+    const nextOrdering = state.ordering === field ? `-${field}` : field;
+    setOrdering(nextOrdering);
+    setPagination((current) => ({ ...current, page: 1 }));
+    setCheckedItems({});
+  };
+
+  const handleAddSuccess = () => {
+    setActiveFilters({});
+    setOrdering("user_name");
+    setPagination((current) => ({ ...current, page: 1 }));
+    setCheckedItems({});
+    setShowSearchModal(false);
+    setIsSearchActive(false);
+  };
+
+  return {
+    showAllLoading,
+    openSearch,
+    handleCheckboxChange,
+    handleDeleteSelected,
+    handleSave,
+    handleSearchChange,
+    applySearch,
+    handleShowAll,
+    handleCloseSearch,
+    handlePageChange,
+    handlePageSizeChange,
+    handleOrderingChange,
+    handleAddSuccess,
+  };
+}

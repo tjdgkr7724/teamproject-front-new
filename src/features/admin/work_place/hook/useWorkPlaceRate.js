@@ -1,0 +1,71 @@
+import { RATE_FIELDS } from "../constants/rateFields";
+import { addWorkPlaceRates, createWorkPlaceRate } from "../api/userWorkplace_addList";
+import { getWorkPlaceFiltering } from "../api/userWorkplaceFiltering";
+import { updateWorkPlaceRate } from "../api/userWorkplace_Update";
+import { deleteWorkPlaceRate } from "../api/userWorkplace_Delete";
+
+const buildEmptyRatePayload = (rateUuid) => ({
+  rate_uuid: rateUuid,
+  ...RATE_FIELDS.reduce((payload, field) => {
+    payload[field.key] = null;
+    return payload;
+  }, {}),
+});
+
+export function useWorkPlaceRate(toast) {
+  const handleAdd = async (payload) =>
+    await createWorkPlaceRate(
+      {
+        user_uuid: payload.user_uuid,
+        admin_work_place_uuid: payload.admin_work_place_uuid,
+        work_place: payload.work_place,
+        ...RATE_FIELDS.reduce((next, field) => {
+          next[field.key] = payload[field.key] ?? null;
+          return next;
+        }, {}),
+      },
+      toast
+    );
+
+  const handleAddMany = async (payloads) =>
+    await addWorkPlaceRates(
+      payloads.map((payload) => ({
+        user_uuid: payload.user_uuid,
+        admin_work_place_uuid: payload.admin_work_place_uuid,
+        work_place: payload.work_place,
+        ...RATE_FIELDS.reduce((next, field) => {
+          next[field.key] = payload[field.key] ?? null;
+          return next;
+        }, {}),
+      })),
+      toast
+    );
+
+  const handleUpdate = async (payload) =>
+    await updateWorkPlaceRate(payload, { toast });
+
+  const handleDelete = async ({ user, rate_uuid }) => {
+    if (!rate_uuid) return null;
+
+    if (user.rates.length === 1) {
+      const rate = user.rates[0];
+      return await updateWorkPlaceRate(
+        buildEmptyRatePayload(rate.rate_uuid),
+        { toast }
+      );
+    }
+
+    return await deleteWorkPlaceRate({ rate_uuid }, toast);
+  };
+
+  const handleFiltering = async ({ user_name, work_place }) =>
+    await getWorkPlaceFiltering({ user_name, work_place }, toast);
+
+  return {
+    handleAdd,
+    handleAddMany,
+    handleUpdate,
+    handleDelete,
+    handleFiltering,
+  };
+}

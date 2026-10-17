@@ -1,0 +1,175 @@
+import {
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+  ModalCloseButton,
+  FormControl,
+  FormLabel,
+  FormErrorMessage,
+  Input,
+  Button,
+  VStack,
+  HStack,
+  Select,
+  Alert,
+  AlertIcon,
+  Text,
+} from "@chakra-ui/react";
+
+import { useAddPersonLogic } from "../hook/useAddPersonLogic";
+import { CARRIER_OPTIONS } from "../constants/carrierConstants";
+
+const AddPersonModal = ({ isOpen, onClose, onSave, toast }) => {
+  const {
+    saving,
+    errors,
+    formData,
+    handleChange,
+    handleSubmitBase,
+    setFormData,
+  } = useAddPersonLogic(onSave, onClose, toast);
+
+  const openAddressSearch = () => {
+    if (!window.daum) {
+      toast?.({
+        title: "주소 검색 사용 불가",
+        description: "주소 검색 스크립트가 로드되지 않았습니다.",
+        status: "error",
+        duration: 2500,
+        isClosable: true,
+      });
+      return;
+    }
+
+    new window.daum.Postcode({
+      oncomplete: (data) => {
+        setFormData((prev) => ({
+          ...prev,
+          address: data.roadAddress || data.jibunAddress,
+        }));
+      },
+    }).open();
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={saving ? () => {} : onClose} size="lg" isCentered closeOnOverlayClick={false} closeOnEsc={false}>
+      <ModalOverlay />
+      <ModalContent w={{ base: "90%", md: "100%" }} maxH="90dvh" my="5dvh" borderRadius="xl" overflow="hidden">
+        <ModalHeader>직원 추가</ModalHeader>
+        <ModalCloseButton isDisabled={saving} />
+
+        <form noValidate onSubmit={handleSubmitBase} style={{ display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+          <ModalBody overflowY="auto" px={{ base: 4, md: 6 }}>
+            <VStack as="fieldset" disabled={saving} spacing={4} border={0} p={0} m={0} minW={0}>
+              <FormControl isRequired isInvalid={Boolean(errors.user_name)}>
+                <FormLabel>이름</FormLabel>
+                <Input
+                  name="user_name"
+                  value={formData.user_name}
+                  onChange={handleChange}
+                />
+                <FormErrorMessage>{errors.user_name}</FormErrorMessage>
+              </FormControl>
+
+              <FormControl isRequired isInvalid={Boolean(errors.resident_number)}>
+                <FormLabel>주민등록번호</FormLabel>
+                <Input
+                  name="resident_number"
+                  value={formData.resident_number}
+                  onChange={handleChange}
+                  placeholder="000000-0000000"
+                />
+                <FormErrorMessage>{errors.resident_number}</FormErrorMessage>
+              </FormControl>
+
+              <FormControl isRequired isInvalid={Boolean(errors.mobile_carrier || errors.phone_number)}>
+                <FormLabel>통신사 / 전화번호</FormLabel>
+                <HStack spacing={2}>
+                  <Select
+                    name="mobile_carrier"
+                    value={formData.mobile_carrier}
+                    onChange={handleChange}
+                    w="120px"
+                  >
+                    <option value="">통신사</option>
+                    {CARRIER_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </Select>
+                  <Input
+                    name="phone_number"
+                    value={formData.phone_number}
+                    onChange={handleChange}
+                    placeholder="010-1234-5678"
+                  />
+                </HStack>
+                <FormErrorMessage>{errors.mobile_carrier || errors.phone_number}</FormErrorMessage>
+              </FormControl>
+
+              <FormControl isRequired isInvalid={Boolean(errors.address)}>
+                <FormLabel>주소</FormLabel>
+                <Button
+                  size="sm"
+                  mb={2}
+                  onClick={openAddressSearch}
+                  type="button"
+                >
+                  주소 검색
+                </Button>
+                <Input
+                  name="address"
+                  value={formData.address}
+                  isReadOnly
+                  placeholder="도로명 주소"
+                />
+                <FormErrorMessage>{errors.address}</FormErrorMessage>
+              </FormControl>
+
+              <FormControl>
+                <FormLabel>상세주소</FormLabel>
+                <Input
+                  name="address_detail"
+                  value={formData.address_detail}
+                  onChange={handleChange}
+                />
+              </FormControl>
+
+              <FormControl isRequired isInvalid={Boolean(errors.user_id)}>
+                <FormLabel>아이디</FormLabel>
+                <Input
+                  name="user_id"
+                  value={formData.user_id}
+                  onChange={handleChange}
+                />
+                <FormErrorMessage>{errors.user_id}</FormErrorMessage>
+              </FormControl>
+
+              <Alert status="info" borderRadius="md" alignItems="flex-start">
+                <AlertIcon />
+                <Text fontSize="sm">
+                  초기 비밀번호는 주민등록번호 앞 6자리이며, 직원은 최초 로그인 후 반드시 새 비밀번호로 변경해야 합니다.
+                </Text>
+              </Alert>
+            </VStack>
+          </ModalBody>
+
+          <ModalFooter flexShrink={0} px={{ base: 4, md: 6 }} py={4}>
+            <Button type="submit" colorScheme="teal" isLoading={saving} loadingText="등록 중...">
+              저장
+            </Button>
+            <Button ml={2} onClick={onClose} isDisabled={saving}>
+              취소
+            </Button>
+          </ModalFooter>
+        </form>
+      </ModalContent>
+    </Modal>
+  );
+};
+
+export default AddPersonModal;
