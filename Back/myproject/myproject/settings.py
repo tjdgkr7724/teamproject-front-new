@@ -1,0 +1,196 @@
+from pathlib import Path
+from datetime import timedelta
+import environ
+import os
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+env = environ.Env(
+    DEBUG=(bool, False)
+)
+
+environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
+
+SECRET_KEY = env("SECRET_KEY")
+ADMIN_REGISTRATION_PASSWORD = env("ADMIN_REGISTRATION_PASSWORD")
+REFRESH_TOKEN_HASH_SECRET = env("REFRESH_TOKEN_HASH_SECRET")
+FIELD_ENCRYPTION_KEY_ID = env("FIELD_ENCRYPTION_KEY_ID")
+FIELD_ENCRYPTION_KEYS = env.json("FIELD_ENCRYPTION_KEYS")
+FIELD_BLIND_INDEX_KEY = env("FIELD_BLIND_INDEX_KEY")
+DEBUG = env.bool("DEBUG", default=False)
+
+ALLOWED_HOSTS = env.list(
+    "ALLOWED_HOSTS",
+    default=[
+        "127.0.0.1",
+        "localhost",
+        "api.sunsafe.thenano.dev",
+        "sunsafe.thenano.dev",
+    ],
+)
+
+INSTALLED_APPS = [
+    "daphne",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "rest_framework",
+    "corsheaders",
+    "myapp",
+    "django_apscheduler",
+    "channels",
+]
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    )
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKENS": False,
+    "BLACKLIST_AFTER_ROTATION": False,
+    "USER_ID_CLAIM": "sub",
+}
+
+GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = env("GOOGLE_REDIRECT_URI")
+
+GOOGLE_OAUTH2_CLIENT_CONFIG = {
+    "web": {
+        "client_id": GOOGLE_CLIENT_ID,
+        "project_id": "my-django-react-app",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": (
+            "https://www.googleapis.com/oauth2/v1/certs"
+        ),
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "redirect_uris": [GOOGLE_REDIRECT_URI],
+    }
+}
+
+MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
+    "django.middleware.security.SecurityMiddleware",
+]
+
+if not DEBUG:
+    MIDDLEWARE.append(
+        "whitenoise.middleware.WhiteNoiseMiddleware"
+    )
+
+MIDDLEWARE += [
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOWED_ORIGINS = env.list(
+    "CORS_ALLOWED_ORIGINS",
+    default=[
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "https://sunsafe.thenano.dev",
+    ],
+)
+
+CSRF_TRUSTED_ORIGINS = env.list(
+    "CSRF_TRUSTED_ORIGINS",
+    default=[
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "https://sunsafe.thenano.dev",
+    ],
+)
+
+SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SECURE = not DEBUG
+
+SECURE_SSL_REDIRECT = env.bool(
+    "SECURE_SSL_REDIRECT",
+    default=False,
+)
+SECURE_HSTS_SECONDS = env.int(
+    "SECURE_HSTS_SECONDS",
+    default=0,
+)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool(
+    "SECURE_HSTS_INCLUDE_SUBDOMAINS",
+    default=False,
+)
+SECURE_HSTS_PRELOAD = env.bool(
+    "SECURE_HSTS_PRELOAD",
+    default=False,
+)
+
+if env.bool("USE_X_FORWARDED_PROTO", default=False):
+    SECURE_PROXY_SSL_HEADER = (
+        "HTTP_X_FORWARDED_PROTO",
+        "https",
+    )
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": env("DB_NAME"),
+        "USER": env("DB_USER"),
+        "PASSWORD": env("DB_PASSWORD"),
+        "HOST": env("DB_HOST"),
+        "PORT": env("DB_PORT"),
+    }
+}
+
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": env("UPSTASH_REDIS_REST_URL"),
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "CONNECTION_POOL_KWARGS": {
+                "ssl_cert_reqs": None,
+            },
+        },
+    }
+}
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [env("UPSTASH_REDIS_REST_URL")],
+        },
+    }
+}
+
+FRONTEND_URL = env(
+    "FRONTEND_URL",
+    default="http://localhost:3000",
+)
+
+ROOT_URLCONF = "myproject.urls"
+WSGI_APPLICATION = "myproject.wsgi.application"
+ASGI_APPLICATION = "myproject.asgi.application"
+
+LANGUAGE_CODE = "en-us"
+TIME_ZONE = "Asia/Seoul"
+USE_I18N = True
+USE_TZ = False
+
+STATIC_URL = "static/"
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

@@ -1,0 +1,397 @@
+# 관리자 수입/지출 관리
+
+from rest_framework.views import APIView
+from django.db.models.functions import Coalesce, TruncMonth
+from ...models import Expense
+from ...serializers import ExpenseSerializer
+from ...models import Income
+from ...serializers import IncomeSerializer
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django.db.models import Sum
+from datetime import timedelta
+from ..shared import add_months
+from ..shared import get_date_range
+from ..shared import month_start_end
+from ..token import AdminJWTAuthentication
+
+
+def _date_filtered_queryset(model, start_date, end_date):
+    return model.objects.filter(date__gte=start_date, date__lte=end_date)
+
+
+def _serialize_date_filtered(model, serializer_class, start_date, end_date):
+    queryset = _date_filtered_queryset(model, start_date, end_date)
+    return serializer_class(queryset, many=True).data
+
+
+class FinanceTableDateFilteredAPIView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # start_date와 end_date가 모두 있으면 기존 날짜 범위를 우선 사용한다.
+        start_date, end_date = get_date_range(request.query_params)
+
+        # date=YYYY-MM만 있으면 해당 월을 포함한 최근 6개월을 조회한다.
+        if not start_date or not end_date:
+            month_str = request.query_params.get("date")
+            if month_str:
+                try:
+                    year, month = map(int, month_str.split("-"))
+                    if not 1 <= month <= 12:
+                        raise ValueError
+
+                    start_year, start_month = add_months(year, month, 5)
+                    start_date, _ = month_start_end(start_year, start_month)
+                    _, next_month_start = month_start_end(year, month)
+                    end_date = next_month_start - timedelta(days=1)
+                except (TypeError, ValueError):
+                    return Response(
+                        {
+                            "success": False,
+                            "message": "date must be in YYYY-MM format",
+                        }
+                    )
+
+        # 날짜 범위와 기준 월이 모두 없는 경우
+        if not start_date or not end_date:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "start_date and end_date are required, "
+                        "or provide date in YYYY-MM format"
+                    ),
+                }
+            )
+
+        # 조회 범위의 모든 월을 먼저 생성해 데이터가 없는 월도 0원으로 반환한다.
+        monthly_totals = {}
+        current_month, _ = month_start_end(start_date.year, start_date.month)
+        last_month, _ = month_start_end(end_date.year, end_date.month)
+
+        while current_month <= last_month:
+            month_key = current_month.strftime("%Y-%m")
+            monthly_totals[month_key] = {
+                "date": month_key,
+                "expense_totals": {},
+                "income_totals": {},
+                "total_expense": 0,
+                "total_income": 0,
+            }
+            _, current_month = month_start_end(
+                current_month.year, current_month.month
+            )
+
+        # 지출을 월과 지출명 기준으로 합산한다.
+        expense_qs = (
+            _date_filtered_queryset(Expense, start_date, end_date)
+            .annotate(month=TruncMonth("date"))
+            .values("month", "expense_name")
+            .annotate(total_amount=Sum("amount"))
+            .order_by("month", "expense_name")
+        )
+        total_expense = 0
+        for item in expense_qs:
+            month_key = item["month"].strftime("%Y-%m")
+            amount = int(item["total_amount"] or 0)
+            monthly_totals[month_key]["expense_totals"][item["expense_name"]] = amount
+            monthly_totals[month_key]["total_expense"] += amount
+            total_expense += amount
+
+        # 수입을 월과 회사명 기준으로 합산한다.
+        income_qs = (
+            _date_filtered_queryset(Income, start_date, end_date)
+            .annotate(month=TruncMonth("date"))
+            .values("month", "company_name")
+            .annotate(total_amount=Sum("amount"))
+            .order_by("month", "company_name")
+        )
+        total_income = 0
+        for item in income_qs:
+            month_key = item["month"].strftime("%Y-%m")
+            amount = int(item["total_amount"] or 0)
+            monthly_totals[month_key]["income_totals"][item["company_name"]] = amount
+            monthly_totals[month_key]["total_income"] += amount
+            total_income += amount
+
+        return Response(
+            {
+                "success": True,
+                "total_expense": total_expense,
+                "total_income": total_income,
+                "data": list(monthly_totals.values()),
+            }
+        )
+
+
+class IncomeDateFilteredAPIView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # 프론트에서 날짜 범위 받기
+        start_date, end_date = get_date_range(request.query_params)
+
+        if not start_date or not end_date:
+            return Response({"success": False})
+
+        # 지정 날짜 범위의 모든 수입 가져오기
+        incomes = _date_filtered_queryset(Income, start_date, end_date).values(
+            "Income_uuid", "date", "company_name", "company_detail", "amount"
+        )
+        result = list(incomes)
+
+        return Response({"success": True, "data": result})
+
+
+class ExpenseDateFilteredAPIView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # 프론트에서 날짜 범위 받기
+        start_date, end_date = get_date_range(request.query_params)
+
+        if not start_date or not end_date:
+            return Response({"success": False})
+
+        expenses = _date_filtered_queryset(Expense, start_date, end_date)
+
+        # 일반 지출은 기존 응답 형식을 그대로 유지한다.
+        regular_expenses = list(
+            expenses.filter(work_day__isnull=True).values(
+                "expense_uuid", "date", "expense_name", "expense_detail", "amount",
+                "payment_method",
+            )
+        )
+
+        # 급여 지출은 월, 근무지, 주간/야간 기준으로 합산한다.
+        salary_totals = (
+            expenses.filter(work_day__isnull=False)
+            .annotate(salary_month=TruncMonth("date"))
+            .values(
+                "salary_month", "work_day__work_place", "work_day__work_shift",
+                "payment_method",
+            )
+            .annotate(amount=Sum("amount"))
+            .order_by(
+                "salary_month", "work_day__work_place", "work_day__work_shift"
+            )
+        )
+        grouped_salaries = [
+            {
+                "date": item["salary_month"].strftime("%Y-%m"),
+                "expense_name": f'{item["work_day__work_place"]} 급여',
+                "expense_detail": item["work_day__work_shift"],
+                "amount": item["amount"],
+                "payment_method": item["payment_method"],
+            }
+            for item in salary_totals
+        ]
+
+        result = regular_expenses + grouped_salaries
+
+        return Response({"success": True, "data": result})
+
+
+class Expense3MonthsTotalsAPIView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        month_str = request.query_params.get("month")  
+        if not month_str:
+            return Response({"success": False})
+
+        try:
+            year, month = map(int, month_str.split("-"))
+            if not (1 <= month <= 12):
+                raise ValueError
+        except ValueError:
+            return Response({"success": False})
+
+        data = {}
+
+        # 기준달(0), 지난달(1), 지지난달(2)
+        for delta in [0, 1, 2]:
+            y, m = add_months(year, month, delta)
+
+            month_key = f"expense_totals_{y}-{m:02d}"
+
+            start, next_start = month_start_end(y, m)
+
+            qs = (
+                Expense.objects
+                .filter(
+                    date__gte=start,
+                    date__lt=next_start,
+                    work_day__isnull=False,
+                )
+                .values("expense_name")
+                .annotate(total=Coalesce(Sum("amount"), 0))
+            )
+            data[month_key] = {
+                row["expense_name"]: int(row["total"] or 0)
+                for row in qs
+            }
+        return Response({"success": True, "data": data})
+
+
+class ExpenseAddAPIView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        # 새로운 지출 추가
+        serializer = ExpenseSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            result = serializer.data
+            success = True
+        else:
+            result = serializer.errors
+            success = False
+
+        # 최종 반환
+        return Response(
+            {"success": success, "expense_data": result}
+            if success
+            else {"success": success}
+        )
+
+
+class IncomeAddAPIView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        # 새로운 매출 추가
+        serializer = IncomeSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            result = serializer.data
+            success = True
+        else:
+            result = serializer.errors
+            success = False
+
+        # 최종 반환
+        return Response(
+            {"success": success, "income_data": result}
+            if success
+            else {"success": success}
+        )
+
+
+class IncomeUpdateAPIView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request):
+        # 필수: Income_uuid 및 날짜 범위
+        Income_uuid = request.data["Income_uuid"]
+        start_date, end_date = get_date_range(request.data)
+
+        # 레코드 업데이트
+        income_instance = Income.objects.get(Income_uuid=Income_uuid)
+        serializer = IncomeSerializer(income_instance, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+
+            # 날짜 범위 필터링된 데이터 반환
+            income_data = _serialize_date_filtered(
+                Income, IncomeSerializer, start_date, end_date
+            )
+
+            return Response({"success": True, "income_data": income_data})
+        else:
+            return Response({"success": False})
+
+
+class ExpenseUpdateAPIView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request):
+        # 필수: expense_uuid 및 날짜 범위
+        expense_uuid = request.data["expense_uuid"]
+        start_date, end_date = get_date_range(request.data)
+
+        # 레코드 업데이트
+        expense_instance = Expense.objects.get(expense_uuid=expense_uuid)
+        serializer = ExpenseSerializer(
+            expense_instance, data=request.data, partial=True
+        )
+        if serializer.is_valid():
+            serializer.save()
+
+            # 날짜 범위 필터링된 데이터 반환
+            expense_data = _serialize_date_filtered(
+                Expense, ExpenseSerializer, start_date, end_date
+            )
+
+            return Response({"success": True, "expense_data": expense_data})
+        else:
+            return Response({"success": False})
+
+
+class IncomeDeleteAPIView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        # 필수: Income_uuid 및 날짜 범위
+        Income_uuid = request.data["Income_uuid"]
+        start_date, end_date = get_date_range(request.data)
+
+        try:
+            # 레코드 삭제
+            income_instance = Income.objects.get(Income_uuid=Income_uuid)
+            income_instance.delete()
+
+            # 삭제 후 날짜 범위 필터링된 데이터 반환
+            income_data = _serialize_date_filtered(
+                Income, IncomeSerializer, start_date, end_date
+            )
+
+            return Response({"success": True, "income_data": income_data})
+
+        except Income.DoesNotExist:
+            return Response({"success": False})
+
+
+class ExpenseDeleteAPIView(APIView):
+    authentication_classes = [AdminJWTAuthentication]
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+
+        # 필수: expense_uuid 및 날짜 범위
+        expense_uuid = request.data["expense_uuid"]
+        start_date, end_date = get_date_range(request.data)
+
+        try:
+            # 레코드 삭제
+            expense_instance = Expense.objects.get(expense_uuid=expense_uuid)
+            expense_instance.delete()
+
+            # 삭제 후 날짜 범위 필터링된 데이터 반환
+            expense_data = _serialize_date_filtered(
+                Expense, ExpenseSerializer, start_date, end_date
+            )
+
+            return Response({"success": True, "expense_data": expense_data})
+
+        except Expense.DoesNotExist:
+            return Response({"success": False})
