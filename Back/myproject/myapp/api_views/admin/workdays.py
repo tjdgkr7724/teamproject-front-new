@@ -8,8 +8,9 @@ from django.db.models.functions import Coalesce
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from ...models import User_WorkDay, User_WorkDetail
+from ...models import User_WorkDay, User_WorkDetail, User_Login_Info, WorkPlaceRate
 from ...serializers import UserWorkDaySerializer
+from ..shared.name_search import filter_by_name
 from ..shared.salary_utils import sync_salary_expense_for_workday
 from ..token import AdminJWTAuthentication
 
@@ -48,7 +49,7 @@ class AdminPageWorkDayListAPIView(APIView):
         status = request.query_params.get("status")  # 대기, 승인, 거절, 전체
         work_shift = request.query_params.get("work_shift")
         work_place = request.query_params.get("work_place")
-        user_name = request.query_params.get("user_name")
+        user_name = request.query_params.get("user_name", "").strip()
         extra_work = request.query_params.get("extra_work")
         start_date_str = request.query_params.get("start_date")  # YYYY-MM-DD
         end_date_str = request.query_params.get("end_date")  # YYYY-MM-DD
@@ -103,7 +104,7 @@ class AdminPageWorkDayListAPIView(APIView):
             user_work_day = user_work_day.filter(work_place=work_place)
 
         if user_name:
-            user_work_day = user_work_day.filter(user_name__icontains=user_name)
+            user_work_day = filter_by_name(user_work_day, user_name)
 
         if extra_work:
             user_work_day = user_work_day.filter(
@@ -157,8 +158,10 @@ class AdminPageWorkDayListAPIView(APIView):
                 status=400,
             )
 
-        page_queryset = page.object_list.prefetch_related("details")
-        serializer = UserWorkDaySerializer(page_queryset, many=True)
+        page_queryset = page.object_list.select_related("salary_expense").prefetch_related("details")
+        serializer = UserWorkDaySerializer(page_queryset, many=True, context={
+            "rate_history": list(WorkPlaceRate.objects.filter(user_id__in=[wd.user_uuid_id for wd in page_queryset]))
+        })
         return Response(
             {
                 "success": True,
@@ -202,7 +205,7 @@ class AdminWorkDayStatusUpdateAPIView(APIView):
             work_day = User_WorkDay.objects.get(
                 user_uuid_id=user_uuid, work_date=work_date, work_shift=work_shift
             )
-        except User_WorkDay.DoesNotExist:
+        except (User_WorkDay.DoesNotExist, User_WorkDay.MultipleObjectsReturned, ValueError):
             return None
 
         return {
@@ -236,11 +239,15 @@ class AdminWorkDayStatusUpdateAPIView(APIView):
             updates.append(update)
 
         with transaction.atomic():
+            user_ids = sorted({u["work_day"].user_uuid_id for u in updates}, key=str)
+            list(User_Login_Info.objects.select_for_update().filter(pk__in=user_ids).order_by("pk"))
             for update in updates:
-                work_day = update["work_day"]
+                work_day = User_WorkDay.objects.select_for_update().get(pk=update["work_day"].pk)
                 status = update["status"]
                 reject_reason = update["reject_reason"]
 
+                if status is True and work_day.is_approved is True:
+                    continue
                 if status == True:
                     work_day.is_approved = True
                     work_day.reject_reason = None

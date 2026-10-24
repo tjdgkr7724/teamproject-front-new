@@ -14,16 +14,19 @@ import {
   Text,
   Divider,
   useDisclosure,
+  useToast,
   Portal,
 } from "@chakra-ui/react";
 import { BellIcon } from "@chakra-ui/icons";
 import { useNavigate } from "react-router-dom";
 import { useAlarm } from "./alarmContext";
 import { useUser } from "../auth/userContext";
+import { fetchNotices } from "../board/notices/api/boardNotices";
 
 const Alarm = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const navigate = useNavigate();
+  const toast = useToast();
 
   const alarmCtx = useAlarm();
   const { loginType } = useUser();
@@ -33,6 +36,37 @@ const Alarm = () => {
   const alarms = alarmCtx.alarms ?? [];
   const unreadCount = alarmCtx.unreadCount ?? 0;
   const markAsRead = alarmCtx.markAsRead;
+
+  const openAlarm = async (alarm) => {
+    if (alarm.type === "admin-approval") {
+      const monthQuery = /^\d{4}-(0[1-9]|1[0-2])$/.test(alarm.workMonth || "")
+        ? `?month=${encodeURIComponent(alarm.workMonth)}`
+        : "";
+      navigate(`/dashboard/approval${monthQuery}`);
+    }
+    if (alarm.type === "notice") {
+      try {
+        const notices = await fetchNotices(
+          { loginType, title: alarm.title, page: 1 },
+          { toast }
+        );
+        const matchedNotice = notices.results.find(
+          (notice) => notice.title === alarm.title
+        );
+        navigate(
+          matchedNotice?.notice_uuid
+            ? `/note/notices/${matchedNotice.notice_uuid}`
+            : "/note"
+        );
+      } catch {
+        navigate("/note");
+      }
+    }
+    if (typeof markAsRead === "function") {
+      markAsRead(alarm.id);
+    }
+    onClose();
+  };
 
   return (
     <Popover
@@ -158,15 +192,7 @@ const Alarm = () => {
                     : "blue.300"
                 }
                 _hover={{ bg: "gray.50" }}
-                onClick={() => {
-                  if (alarm.type === "notice") {
-                    navigate("/note");
-                  }
-                  if (typeof markAsRead === "function") {
-                    markAsRead(alarm.id);
-                  }
-                  onClose();
-                }}
+                onClick={() => openAlarm(alarm)}
               >
                 <Text fontWeight="bold">
                   {alarm.title}
@@ -178,7 +204,9 @@ const Alarm = () => {
                     color="red.500"
                     mt={1}
                   >
-                  {alarm.type === "notice" ? alarm.description : `사유: ${alarm.description}`}
+                  {alarm.type === "notice" || alarm.type === "admin-approval"
+                    ? alarm.description
+                    : `사유: ${alarm.description}`}
                   </Text>
                 )}
 

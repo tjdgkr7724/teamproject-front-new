@@ -16,7 +16,7 @@ import {
 } from "@chakra-ui/react";
 import { ChevronLeftIcon, ChevronRightIcon, HamburgerIcon } from "@chakra-ui/icons";
 import { useNavigate } from "react-router-dom";
-import { FiBarChart2, FiLogOut } from "react-icons/fi";
+import { FiBarChart2, FiCalendar, FiLogOut } from "react-icons/fi";
 import { HiOutlineMegaphone } from "react-icons/hi2";
 
 import { Alarm } from "../../alarm";
@@ -41,6 +41,7 @@ export default function CalendarHeader({
   hideActions = false,
   hideSummaryOnMobile = false,
   onMonthlyCompareOpen,
+  onWorkScheduleOpen,
   comparisonLoading = false,
 }) {
   const navigate = useNavigate();
@@ -144,12 +145,21 @@ export default function CalendarHeader({
                 <VStack align="stretch" spacing={1}>
                   <Button
                     justifyContent="flex-start"
+                    leftIcon={<FiCalendar />}
+                    variant="ghost"
+                    size="lg"
+                    onClick={() => runMenuAction(onWorkScheduleOpen)}
+                  >
+                    근무표 조회
+                  </Button>
+                  <Button
+                    justifyContent="flex-start"
                     leftIcon={<HiOutlineMegaphone />}
                     variant="ghost"
                     size="lg"
                     onClick={() => runMenuAction(openBoard)}
                   >
-                    사내 게시판
+                    커뮤니티
                   </Button>
                   <Button
                     justifyContent="flex-start"
@@ -189,7 +199,7 @@ export default function CalendarHeader({
             <HStack position="absolute" right="0" zIndex="1">
               <Alarm />
               <Button size="sm" colorScheme="blue" variant="outline" leftIcon={<HiOutlineMegaphone />} onClick={openBoard}>
-                사내 게시판
+                커뮤니티
               </Button>
               <Button size="sm" colorScheme="red" onClick={handleLogout}>
                 로그아웃
